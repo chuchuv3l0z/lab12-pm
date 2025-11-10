@@ -79,4 +79,10 @@ dependencies {
     // Widgets de Google Maps Compose
     implementation("com.google.maps.android:maps-compose-widgets:$mapsComposeVersion")
 
+    // Play Services Location
+    implementation("com.google.android.gms:play-services-location:21.0.1")
+
+    implementation("androidx.compose.material:material-icons-extended")
+
+
 }

@@ -1,20 +1,36 @@
 package com.example.lab12_maps
 
+import android.Manifest
+import android.location.Location
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Menu
+import androidx.compose.material.icons.filled.MyLocation
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
-import androidx.compose.runtime.*
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.core.content.ContextCompat
+import com.google.android.gms.location.LocationServices
 import com.google.android.gms.maps.CameraUpdateFactory
 import com.google.android.gms.maps.model.BitmapDescriptorFactory
 import com.google.android.gms.maps.model.CameraPosition
@@ -27,9 +43,14 @@ import com.google.maps.android.compose.Polygon
 import com.google.maps.android.compose.Polyline
 import com.google.maps.android.compose.rememberCameraPositionState
 import com.google.maps.android.compose.rememberMarkerState
+import kotlinx.coroutines.launch
 
 @Composable
 fun MapScreen() {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val fusedClient = LocationServices.getFusedLocationProviderClient(context)
+
     // Ubicaciones clave
     val arequipaLocation = LatLng(-16.4040102, -71.559611)
     val yuraLocation = LatLng(-16.2520984, -71.6836503)
@@ -39,15 +60,41 @@ fun MapScreen() {
         position = CameraPosition.fromLatLngZoom(arequipaLocation, 12f)
     }
 
-    // Estado del tipo de mapa (usando MapProperties para Maps Compose 4.4.1)
+    // Propiedades del mapa (tipo de mapa)
     var mapProperties by remember {
         mutableStateOf(MapProperties(mapType = MapType.NORMAL))
     }
 
-    // Estado del menú del botón flotante
-    var isMenuExpanded by remember { mutableStateOf(false) }
+    // Estados UI
+    var isMapTypeMenuExpanded by remember { mutableStateOf(false) }
+    val snackbarHostState = remember { SnackbarHostState() }
 
-    // Animación: mover cámara hacia Yura al iniciar
+    // Estado de permiso de ubicación
+    var hasLocationPermission by remember {
+        mutableStateOf(
+            ContextCompat.checkSelfPermission(
+                context,
+                Manifest.permission.ACCESS_FINE_LOCATION
+            ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+        )
+    }
+
+    // Estado para guardar ubicación actual del usuario
+    var userLocation by remember { mutableStateOf<LatLng?>(null) }
+
+    // Launcher para pedir permiso en tiempo de ejecución
+    val permissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        hasLocationPermission = granted
+        if (!granted) {
+            scope.launch {
+                snackbarHostState.showSnackbar("Permiso de ubicación denegado.")
+            }
+        }
+    }
+
+    // Animación inicial hacia Yura
     LaunchedEffect(Unit) {
         cameraPositionState.animate(
             update = CameraUpdateFactory.newLatLngZoom(yuraLocation, 12f),
@@ -156,16 +203,25 @@ fun MapScreen() {
                 width = 6f,
                 color = Color.Green
             )
+
+            // Marcador de ubicación actual (si existe)
+            userLocation?.let { userLatLng ->
+                Marker(
+                    state = rememberMarkerState(position = userLatLng),
+                    title = "Tu ubicación",
+                    icon = BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_AZURE)
+                )
+            }
         }
 
-        // Botón flotante + menú para cambiar tipo de mapa
+        // FAB: cambiar tipo de mapa (abajo derecha)
         Box(
             modifier = Modifier
                 .align(Alignment.BottomEnd)
-                .padding(end = 24.dp, bottom = 120.dp)
+                .padding(end = 24.dp, bottom = 120.dp) // arriba del zoom
         ) {
             FloatingActionButton(
-                onClick = { isMenuExpanded = !isMenuExpanded },
+                onClick = { isMapTypeMenuExpanded = !isMapTypeMenuExpanded },
                 containerColor = Color(0xFF1976D2)
             ) {
                 Icon(
@@ -176,38 +232,88 @@ fun MapScreen() {
             }
 
             DropdownMenu(
-                expanded = isMenuExpanded,
-                onDismissRequest = { isMenuExpanded = false }
+                expanded = isMapTypeMenuExpanded,
+                onDismissRequest = { isMapTypeMenuExpanded = false }
             ) {
                 DropdownMenuItem(
                     text = { Text("Normal") },
                     onClick = {
                         mapProperties = mapProperties.copy(mapType = MapType.NORMAL)
-                        isMenuExpanded = false
+                        isMapTypeMenuExpanded = false
                     }
                 )
                 DropdownMenuItem(
                     text = { Text("Satélite") },
                     onClick = {
                         mapProperties = mapProperties.copy(mapType = MapType.SATELLITE)
-                        isMenuExpanded = false
+                        isMapTypeMenuExpanded = false
                     }
                 )
                 DropdownMenuItem(
                     text = { Text("Terreno") },
                     onClick = {
                         mapProperties = mapProperties.copy(mapType = MapType.TERRAIN)
-                        isMenuExpanded = false
+                        isMapTypeMenuExpanded = false
                     }
                 )
                 DropdownMenuItem(
                     text = { Text("Híbrido") },
                     onClick = {
                         mapProperties = mapProperties.copy(mapType = MapType.HYBRID)
-                        isMenuExpanded = false
+                        isMapTypeMenuExpanded = false
                     }
                 )
             }
         }
+
+        // 📍 FAB: ir a mi ubicación (un poco más arriba del otro)
+        Box(
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .padding(end = 24.dp, bottom = 200.dp)
+        ) {
+            FloatingActionButton(
+                onClick = {
+                    if (!hasLocationPermission) {
+                        permissionLauncher.launch(Manifest.permission.ACCESS_FINE_LOCATION)
+                    } else {
+                        scope.launch {
+                            try {
+                                val location: Location? = fusedClient.awaitLastLocation()
+                                if (location != null) {
+                                    val latLng = LatLng(location.latitude, location.longitude)
+                                    userLocation = latLng
+                                    cameraPositionState.animate(
+                                        update = CameraUpdateFactory.newLatLngZoom(latLng, 16f),
+                                        durationMs = 1500
+                                    )
+                                } else {
+                                    snackbarHostState.showSnackbar(
+                                        "No se pudo obtener la ubicación. Prueba en dispositivo físico o activa el GPS."
+                                    )
+                                }
+                            } catch (e: Exception) {
+                                snackbarHostState.showSnackbar(
+                                    "Error al obtener ubicación: ${e.message}"
+                                )
+                            }
+                        }
+                    }
+                },
+                containerColor = Color(0xFF009688)
+            ) {
+                Icon(
+                    imageVector = Icons.Filled.MyLocation,
+                    contentDescription = "Mi ubicación",
+                    tint = Color.White
+                )
+            }
+        }
+
+        // Snackbar para mensajes
+        SnackbarHost(
+            hostState = snackbarHostState,
+            modifier = Modifier.align(Alignment.BottomCenter)
+        )
     }
 }
